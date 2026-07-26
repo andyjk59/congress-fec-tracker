@@ -10,7 +10,10 @@ def connect(db_path=config.DB_PATH):
     # that created it. Ingestion scripts are single-threaded, so this is
     # safe there too -- we just never share one connection across
     # concurrent writers.
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    # Bulk ingestion agents hold a write transaction open for an entire page
+    # of API calls; a 30s busy timeout lets short admin/read queries from
+    # another process succeed without the caller needing to pause the job.
+    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

@@ -4,7 +4,43 @@ import streamlit as st
 import config
 import db
 
-st.set_page_config(page_title="Congress + FEC Tracker", page_icon="\U0001f3db️", layout="wide")
+st.set_page_config(page_title="Congress + FEC Tracker", layout="wide", menu_items={})
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap');
+
+    html, body, [class*="css"], .stMarkdown, .stDataFrame, input, textarea, button, select {
+        font-family: 'Source Serif 4', Georgia, Cambria, 'Times New Roman', serif !important;
+    }
+
+    #MainMenu, header, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {
+        visibility: hidden;
+        height: 0;
+    }
+
+    .stApp {
+        background-color: #F5F0E6;
+    }
+
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF;
+        border-right: 1px solid #E4DDCC;
+    }
+
+    h1, h2, h3 {
+        color: #1F1D1A;
+        letter-spacing: 0.01em;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #1F1D1A;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 @st.cache_resource
@@ -23,7 +59,7 @@ def has_data() -> bool:
     return df("SELECT COUNT(*) AS n FROM bills")["n"].iloc[0] > 0
 
 
-st.title("\U0001f3db️ Congress + FEC Tracker")
+st.title("Congress + FEC Tracker")
 st.caption(
     "Congressional bills through their full lifecycle, paired with FEC itemized donor "
     "retention for House/Senate campaign committees, linked by sponsor and by policy area."
@@ -38,7 +74,10 @@ if not has_data():
 
 page = st.sidebar.radio(
     "View",
-    ["Active Bills Overview", "Search Bills", "Browse by Period", "Committee Retention", "Sponsor Spotlight"],
+    [
+        "Active Bills Overview", "Search Bills", "Browse by Period",
+        "Committee Retention", "Sponsor Spotlight", "Search by Donor",
+    ],
 )
 
 STAGE_ORDER = ["Introduced", "In Committee", "Passed House", "Passed Senate", "To President", "Signed", "Vetoed"]
@@ -187,3 +226,45 @@ elif page == "Sponsor Spotlight":
         st.info("No industry-signal data ingested yet for this sponsor's committee.")
     else:
         st.dataframe(industry, use_container_width=True, hide_index=True)
+
+# ---------------------------------------------------------------- Search by donor
+elif page == "Search by Donor":
+    st.subheader("Search by Donor")
+    st.caption(
+        "Look up an organization or PAC to see which campaign committees it gave to, and which "
+        "bills those committees' sponsors have introduced. This covers organizational/PAC donors "
+        "only — individual donor identity is never shown, only committee-level aggregates "
+        "elsewhere in this app."
+    )
+    donor_query = st.text_input("Donor or PAC name contains")
+    if not donor_query:
+        st.info("Enter a donor or PAC name to search — e.g. a company, union, or trade association.")
+    else:
+        matches = df(
+            "SELECT DISTINCT donor_name FROM fec_committee_org_donors "
+            "WHERE donor_name LIKE ? ORDER BY donor_name LIMIT 50",
+            (f"%{donor_query.upper()}%",),
+        )
+        if matches.empty:
+            st.info("No matching donors ingested yet.")
+        else:
+            chosen_donor = st.selectbox("Matches", matches["donor_name"])
+
+            st.markdown("**Committees funded**")
+            given = df(
+                "SELECT DISTINCT committee_name, cycle, total_amount, contribution_count "
+                "FROM v_donor_bills WHERE donor_name = ? ORDER BY cycle DESC, total_amount DESC",
+                (chosen_donor,),
+            )
+            st.dataframe(given, use_container_width=True, hide_index=True)
+
+            st.markdown("**Bills sponsored by candidates this donor funded**")
+            supported_bills = df(
+                "SELECT DISTINCT bill_id, title, current_stage, policy_area, sponsor_name "
+                "FROM v_donor_bills WHERE donor_name = ? ORDER BY bill_id",
+                (chosen_donor,),
+            )
+            if supported_bills.empty:
+                st.info("No bills found yet for this donor's funded candidates.")
+            else:
+                st.dataframe(supported_bills, use_container_width=True, hide_index=True)
