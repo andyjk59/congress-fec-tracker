@@ -5,3 +5,7 @@ __pycache__/
 venv/
 .venv/
 .DS_Store
+.claude/
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

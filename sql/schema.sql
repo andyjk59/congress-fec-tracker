@@ -102,8 +102,24 @@ CREATE TABLE IF NOT EXISTS fec_committee_industry_signal (
   PRIMARY KEY (committee_id, cycle, industry_label)
 );
 
+-- Named organizational/PAC donors only (entity_type != 'IND') -- FEC already
+-- publicly discloses which PACs/organizations gave to which committees, so
+-- naming them here doesn't touch the individual-donor-privacy design that
+-- donor_fingerprints/donor_retention are built around (those stay anonymous
+-- by construction; this table is a deliberate, narrower exception).
+CREATE TABLE IF NOT EXISTS fec_committee_org_donors (
+  committee_id TEXT NOT NULL REFERENCES fec_committees(committee_id),
+  cycle INTEGER NOT NULL,
+  donor_name TEXT NOT NULL,
+  entity_type TEXT,
+  total_amount REAL,
+  contribution_count INTEGER,
+  PRIMARY KEY (committee_id, cycle, donor_name)
+);
+
 CREATE INDEX IF NOT EXISTS idx_bills_congress_stage ON bills(congress, current_stage);
 CREATE INDEX IF NOT EXISTS idx_bills_sponsor ON bills(sponsor_bioguide_id);
 CREATE INDEX IF NOT EXISTS idx_actions_bill_id ON bill_actions(bill_id);
 CREATE INDEX IF NOT EXISTS idx_fec_candidates_bioguide ON fec_candidates(bioguide_id);
 CREATE INDEX IF NOT EXISTS idx_fec_committees_candidate ON fec_committees(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_org_donors_name ON fec_committee_org_donors(donor_name);

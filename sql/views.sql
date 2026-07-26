@@ -44,3 +44,20 @@ JOIN fec_candidates fcand ON fcand.bioguide_id = l.bioguide_id
 JOIN fec_committees fc ON fc.candidate_id = fcand.candidate_id AND fc.designation = 'P'
 JOIN fec_committee_industry_signal sig
   ON sig.committee_id = fc.committee_id AND sig.industry_label = b.policy_area;
+
+-- Reverse link: donating organization/PAC -> committees it gave to -> the
+-- sponsor that committee funds -> bills that sponsor introduced. This is
+-- "which bills has this donating body supported," expressed as a single
+-- join chain rather than looked up piecemeal in Python.
+DROP VIEW IF EXISTS v_donor_bills;
+CREATE VIEW v_donor_bills AS
+SELECT
+  od.donor_name, od.cycle, od.total_amount, od.contribution_count,
+  fc.committee_id, fc.name AS committee_name,
+  l.bioguide_id AS sponsor_bioguide_id, l.full_name AS sponsor_name, l.party AS sponsor_party, l.state AS sponsor_state,
+  b.bill_id, b.title, b.current_stage, b.policy_area, b.introduced_date
+FROM fec_committee_org_donors od
+JOIN fec_committees fc ON fc.committee_id = od.committee_id
+JOIN fec_candidates fcand ON fcand.candidate_id = fc.candidate_id
+JOIN legislators l ON l.bioguide_id = fcand.bioguide_id
+JOIN bills b ON b.sponsor_bioguide_id = l.bioguide_id;

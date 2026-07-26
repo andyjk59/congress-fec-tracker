@@ -117,6 +117,23 @@ def _upsert_fingerprint(cache_conn, committee_id, cycle, fp, employer, occupatio
     )
 
 
+def _upsert_org_donor(main_conn, committee_id, cycle, donor_name, entity_type, amount):
+    # Organizational/PAC contributor names are public FEC disclosure, unlike
+    # individual donor identity -- safe to write to the committed main DB
+    # rather than the gitignored cache. See schema.sql for the rationale.
+    main_conn.execute(
+        """
+        INSERT INTO fec_committee_org_donors (committee_id, cycle, donor_name, entity_type,
+                                               total_amount, contribution_count)
+        VALUES (?, ?, ?, ?, ?, 1)
+        ON CONFLICT(committee_id, cycle, donor_name) DO UPDATE SET
+          total_amount = total_amount + excluded.total_amount,
+          contribution_count = contribution_count + 1
+        """,
+        (committee_id, cycle, donor_name, entity_type, amount),
+    )
+
+
 def ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id, cycle) -> bool:
     """Pulls one (committee, cycle) to completion or the row cap. Returns True if now complete."""
     state = _get_state(main_conn, committee_id, cycle)
@@ -147,16 +164,21 @@ def ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id
             return True
 
         for r in results:
+            entity_type = r.get("entity_type")
+            amount = r.get("contribution_receipt_amount") or 0
             fp = fingerprint(r.get("contributor_name"), r.get("contributor_zip"))
             if fp:
                 _upsert_fingerprint(
                     cache_conn, committee_id, cycle, fp,
                     r.get("contributor_employer"), r.get("contributor_occupation"),
-                    r.get("entity_type"), r.get("contribution_receipt_amount") or 0,
+                    entity_type, amount,
                 )
+            if entity_type and entity_type != "IND" and r.get("contributor_name"):
+                _upsert_org_donor(main_conn, committee_id, cycle, r["contributor_name"], entity_type, amount)
             last_index = r.get("index")
             last_date = r.get("contribution_receipt_date")
         cache_conn.commit()
+        main_conn.commit()
         rows_pulled += len(results)
         _save_state(main_conn, committee_id, cycle, last_index, last_date, complete=False, rows_pulled=rows_pulled)
         time.sleep(sleep_s)
