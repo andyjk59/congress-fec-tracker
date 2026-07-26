@@ -15,9 +15,12 @@ st.markdown(
         font-family: 'Source Serif 4', Georgia, Cambria, 'Times New Roman', serif !important;
     }
 
+    /* display:none (not visibility:hidden) -- a merely-invisible fixed-position
+       header still occupies space and intercepts clicks on whatever sits
+       beneath it, which was silently swallowing clicks on the sidebar's
+       view-switcher radio buttons near the top of the page. */
     #MainMenu, header, footer, [data-testid="stToolbar"], [data-testid="stDecoration"] {
-        visibility: hidden;
-        height: 0;
+        display: none !important;
     }
 
     .stApp {
