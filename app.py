@@ -191,8 +191,13 @@ elif page == "Committee Retention":
 elif page == "Sponsor Spotlight":
     sponsors = df(
         "SELECT DISTINCT sponsor_bioguide_id, sponsor_name FROM v_active_bills_overview "
-        "WHERE sponsor_bioguide_id IS NOT NULL ORDER BY sponsor_name"
+        "WHERE sponsor_bioguide_id IS NOT NULL AND sponsor_name IS NOT NULL ORDER BY sponsor_name"
     )
+    # A handful of sponsor_bioguide_ids (e.g. non-voting delegates) have no
+    # matching row in `legislators`, leaving sponsor_name null -- pandas
+    # reads that as NaN, which sorts first and would otherwise become the
+    # default selectbox value, showing the literal text "nan".
+    sponsors = sponsors[sponsors["sponsor_name"].notna()]
     name_to_id = dict(zip(sponsors["sponsor_name"], sponsors["sponsor_bioguide_id"]))
     chosen_name = st.selectbox("Sponsor", sponsors["sponsor_name"])
     bioguide_id = name_to_id[chosen_name]
