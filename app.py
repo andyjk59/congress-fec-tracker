@@ -33,12 +33,9 @@ st.markdown(
         background-color: #F5F0E6;
     }
 
-    /* Bold on purpose, temporarily -- makes it unmistakable whether the
-       sidebar is rendering at all vs. just slow. Ask to tone this back
-       down to something subtle once confirmed. */
     section[data-testid="stSidebar"] {
-        background-color: #FFE600;
-        border-right: 3px solid #1F1D1A;
+        background-color: #FFFFFF;
+        border-right: 1px solid #E4DDCC;
     }
 
     h1, h2, h3 {
