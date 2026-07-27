@@ -27,9 +27,12 @@ st.markdown(
         background-color: #F5F0E6;
     }
 
+    /* Bold on purpose, temporarily -- makes it unmistakable whether the
+       sidebar is rendering at all vs. just slow. Ask to tone this back
+       down to something subtle once confirmed. */
     section[data-testid="stSidebar"] {
-        background-color: #FFFFFF;
-        border-right: 1px solid #E4DDCC;
+        background-color: #FFE600;
+        border-right: 3px solid #1F1D1A;
     }
 
     h1, h2, h3 {
@@ -84,6 +87,11 @@ page = st.sidebar.radio(
 )
 
 STAGE_ORDER = ["Introduced", "In Committee", "Passed House", "Passed Senate", "To President", "Signed", "Vetoed"]
+# Rendering thousands of rows into the interactive grid at once visibly
+# janks the browser's main thread badly enough that even already-painted
+# sidebar content can appear frozen/missing. Cap detail tables; summary
+# metrics/counts still reflect true full totals.
+ROW_CAP = 500
 
 # ---------------------------------------------------------------- Overview
 if page == "Active Bills Overview":
@@ -101,6 +109,11 @@ if page == "Active Bills Overview":
 
     stage_filter = st.multiselect("Filter by stage", STAGE_ORDER, default=STAGE_ORDER)
     shown = bills[bills["current_stage"].isin(stage_filter)].sort_values("latest_action_date", ascending=False)
+
+    if len(shown) > ROW_CAP:
+        st.caption(f"Showing the {ROW_CAP} most recently active of {len(shown)} matching bills. Use Search Bills to find a specific one.")
+        shown = shown.head(ROW_CAP)
+
     st.dataframe(
         shown[["bill_id", "title", "current_stage", "sponsor_name", "policy_area", "latest_action_date"]],
         use_container_width=True, hide_index=True,
@@ -123,10 +136,16 @@ elif page == "Search Bills":
 
     results = df(sql, tuple(params))
     st.write(f"{len(results)} bill(s)")
-    st.dataframe(
-        results[["bill_id", "title", "current_stage", "sponsor_name", "policy_area", "introduced_date"]],
-        use_container_width=True, hide_index=True,
-    )
+    if not keyword and policy_area == "(any)":
+        st.info("Enter a keyword or pick a policy area to narrow this down.")
+    else:
+        if len(results) > ROW_CAP:
+            st.caption(f"Showing the first {ROW_CAP} of {len(results)} matches — narrow your search further.")
+            results = results.head(ROW_CAP)
+        st.dataframe(
+            results[["bill_id", "title", "current_stage", "sponsor_name", "policy_area", "introduced_date"]],
+            use_container_width=True, hide_index=True,
+        )
 
 # ---------------------------------------------------------------- Browse by period
 elif page == "Browse by Period":
@@ -160,6 +179,9 @@ elif page == "Browse by Period":
         ]
 
     st.write(f"{len(shown)} bill(s)")
+    if len(shown) > ROW_CAP:
+        st.caption(f"Showing the first {ROW_CAP} of {len(shown)} — narrow the grouping or use Search Bills.")
+        shown = shown.head(ROW_CAP)
     st.dataframe(
         shown[["bill_id", "title", "current_stage", "sponsor_name", "policy_area", "introduced_date"]],
         use_container_width=True, hide_index=True,
