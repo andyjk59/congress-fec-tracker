@@ -209,9 +209,23 @@ def refresh(main_conn, cache_conn, api_key: str, chunk_size: int | None = None) 
     if chunk_size:
         pending = pending[:chunk_size]
 
+    # A single committee/cycle can fail persistently (e.g. OpenFEC returning
+    # 504 on that specific query for 15+ minutes straight, past what the
+    # patient per-request retry in _get can ride out) without the API being
+    # generally down -- 218+ other pairs succeeded around it in past runs.
+    # Don't let one stuck pair kill a multi-hour unattended backfill: log it,
+    # leave its state incomplete (untouched, so it's retried on the next
+    # run), and move on to the rest of the queue.
+    failed = 0
     for committee_id, cycle in pending:
-        ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id, cycle)
-    return len(pending)
+        try:
+            ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id, cycle)
+        except requests.exceptions.RequestException as e:
+            failed += 1
+            print(f"SKIPPING {committee_id}/{cycle} after persistent failure: {e}")
+    if failed:
+        print(f"{failed} of {len(pending)} pairs failed this run and were skipped (will retry next run)")
+    return len(pending) - failed
 
 
 if __name__ == "__main__":
