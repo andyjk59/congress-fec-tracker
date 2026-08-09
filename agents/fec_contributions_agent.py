@@ -26,6 +26,7 @@ import requests
 
 import config
 import db
+import http_utils
 
 SUFFIXES = (" JR", " SR", " II", " III", " IV")
 
@@ -57,24 +58,11 @@ def _get(session: requests.Session, api_key: str, params: dict) -> dict:
     # sustained backfill will hit the hourly quota even while respecting the
     # per-minute throttle, so on 429 we wait out Retry-After (or an
     # escalating backoff up to 5 minutes) rather than giving up after a few
-    # seconds -- a multi-hour run should stall and resume, not crash. Plain
-    # network hiccups (timeouts, connection resets) get the same patience.
-    for attempt in range(8):
-        try:
-            resp = session.get(f"{config.FEC_API_BASE}/schedules/schedule_a/", params=params, timeout=30)
-        except requests.exceptions.RequestException:
-            if attempt == 7:
-                raise
-            time.sleep(min(5 * 2 ** attempt, 300))
-            continue
-        if resp.status_code == 429 or resp.status_code >= 500:
-            wait = int(resp.headers.get("Retry-After", min(5 * 2 ** attempt, 300)))
-            time.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    resp.raise_for_status()
-    return {}
+    # seconds -- a multi-hour run should stall and resume, not crash. See
+    # http_utils.get_with_retry for the hard wall-clock deadline that
+    # catches connections which stay open but stop transferring data
+    # (requests' own timeout doesn't bound total request duration).
+    return http_utils.get_with_retry(session, f"{config.FEC_API_BASE}/schedules/schedule_a/", params)
 
 
 def _get_state(main_conn, committee_id: str, cycle: int) -> dict:
