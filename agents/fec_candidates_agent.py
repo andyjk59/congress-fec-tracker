@@ -5,7 +5,6 @@ legislators_agent.py (via the congress-legislators crosswalk).
 
 import json
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,32 +12,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import requests
 
 import config
+import http_utils
 
 
 def _get(session: requests.Session, path: str, api_key: str, params: dict | None = None) -> dict:
     params = dict(params or {})
     params["api_key"] = api_key
-    # See fec_contributions_agent._get: OpenFEC's hourly quota can bite even
-    # while under the per-minute burst limit on a run covering ~535
-    # candidates, so wait out Retry-After / an escalating backoff instead of
-    # giving up after a few seconds. Also retry plain network hiccups
-    # (timeouts, connection resets) -- a run this long will see some.
-    for attempt in range(8):
-        try:
-            resp = session.get(f"{config.FEC_API_BASE}{path}", params=params, timeout=30)
-        except requests.exceptions.RequestException:
-            if attempt == 7:
-                raise
-            time.sleep(min(5 * 2 ** attempt, 300))
-            continue
-        if resp.status_code == 429 or resp.status_code >= 500:
-            wait = int(resp.headers.get("Retry-After", min(5 * 2 ** attempt, 300)))
-            time.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    resp.raise_for_status()
-    return {}
+    # See http_utils.get_with_retry for the rate-limit backoff and the hard
+    # wall-clock deadline (requests' own timeout doesn't bound total request
+    # duration, which let a frozen connection hang the FEC backfill twice).
+    return http_utils.get_with_retry(session, f"{config.FEC_API_BASE}{path}", params)
 
 
 def current_member_fec_ids(conn) -> list[tuple[str, str]]:

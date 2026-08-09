@@ -6,7 +6,6 @@ of a Congress happens the first time `refresh()` runs for it (no prior rows).
 """
 
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -14,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import requests
 
 import config
+import http_utils
 
 STAGE_RULES = [
     # (keyword substring in action_text, stage label) -- checked in order, first match wins
@@ -57,22 +57,11 @@ def _get(session: requests.Session, path: str, api_key: str, params: dict | None
     params = dict(params or {})
     params["api_key"] = api_key
     params["format"] = "json"
-    for attempt in range(8):
-        try:
-            resp = session.get(f"{config.CONGRESS_API_BASE}{path}", params=params, timeout=30)
-        except requests.exceptions.RequestException:
-            if attempt == 7:
-                raise
-            time.sleep(min(5 * 2 ** attempt, 300))
-            continue
-        if resp.status_code == 429 or resp.status_code >= 500:
-            wait = int(resp.headers.get("Retry-After", min(5 * 2 ** attempt, 300)))
-            time.sleep(wait)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    resp.raise_for_status()
-    return {}
+    # See http_utils.get_with_retry for the rate-limit backoff and the hard
+    # wall-clock deadline (requests' own timeout doesn't bound total request
+    # duration, which let a frozen connection hang the FEC backfill twice --
+    # applying the same fix here defensively, before it happens on this API).
+    return http_utils.get_with_retry(session, f"{config.CONGRESS_API_BASE}{path}", params)
 
 
 def list_bills(session, congress: int, api_key: str, from_date: str | None = None):
