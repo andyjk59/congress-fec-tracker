@@ -9,19 +9,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import requests
-
 import config
 import http_utils
 
 
-def _get(session: requests.Session, path: str, api_key: str, params: dict | None = None) -> dict:
+def _get(path: str, api_key: str, params: dict | None = None) -> dict:
     params = dict(params or {})
     params["api_key"] = api_key
     # See http_utils.get_with_retry for the rate-limit backoff and the hard
     # wall-clock deadline (requests' own timeout doesn't bound total request
     # duration, which let a frozen connection hang the FEC backfill twice).
-    return http_utils.get_with_retry(session, f"{config.FEC_API_BASE}{path}", params)
+    return http_utils.get_with_retry(f"{config.FEC_API_BASE}{path}", params)
 
 
 def current_member_fec_ids(conn) -> list[tuple[str, str]]:
@@ -36,14 +34,14 @@ def current_member_fec_ids(conn) -> list[tuple[str, str]]:
     return pairs
 
 
-def fetch_candidate(session, candidate_id: str, api_key: str) -> dict | None:
-    data = _get(session, f"/candidate/{candidate_id}/", api_key)
+def fetch_candidate(candidate_id: str, api_key: str) -> dict | None:
+    data = _get(f"/candidate/{candidate_id}/", api_key)
     results = data.get("results", [])
     return results[0] if results else None
 
 
-def fetch_principal_committees(session, candidate_id: str, api_key: str) -> list[dict]:
-    data = _get(session, f"/candidate/{candidate_id}/committees/", api_key, {"per_page": 100})
+def fetch_principal_committees(candidate_id: str, api_key: str) -> list[dict]:
+    data = _get(f"/candidate/{candidate_id}/committees/", api_key, {"per_page": 100})
     return [c for c in data.get("results", []) if c.get("designation") == "P"]
 
 
@@ -76,14 +74,13 @@ def upsert_committee(conn, committee: dict, candidate_id: str):
 
 
 def refresh(conn, api_key: str, limit: int | None = None) -> int:
-    session = requests.Session()
     count = 0
     for bioguide_id, candidate_id in current_member_fec_ids(conn):
-        info = fetch_candidate(session, candidate_id, api_key)
+        info = fetch_candidate(candidate_id, api_key)
         if not info:
             continue
         upsert_candidate(conn, candidate_id, bioguide_id, info)
-        for committee in fetch_principal_committees(session, candidate_id, api_key):
+        for committee in fetch_principal_committees(candidate_id, api_key):
             upsert_committee(conn, committee, candidate_id)
         conn.commit()
         count += 1
