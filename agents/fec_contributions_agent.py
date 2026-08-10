@@ -15,6 +15,7 @@ config.FEC_MAX_ROWS_PER_COMMITTEE_CYCLE, taken in chronological
 the very highest-dollar campaigns, not true even-sampling.
 """
 
+import concurrent.futures
 import hashlib
 import sys
 import time
@@ -52,17 +53,16 @@ def fingerprint(contributor_name: str, zip_code: str) -> str | None:
     return hashlib.sha256(f"{last}|{first_initial}|{zip5}".encode()).hexdigest()
 
 
-def _get(session: requests.Session, api_key: str, params: dict) -> dict:
+def _get(api_key: str, params: dict) -> dict:
     params = dict(params, api_key=api_key)
     # OpenFEC enforces both a per-minute burst limit and a per-hour quota. A
     # sustained backfill will hit the hourly quota even while respecting the
     # per-minute throttle, so on 429 we wait out Retry-After (or an
     # escalating backoff up to 5 minutes) rather than giving up after a few
     # seconds -- a multi-hour run should stall and resume, not crash. See
-    # http_utils.get_with_retry for the hard wall-clock deadline that
-    # catches connections which stay open but stop transferring data
-    # (requests' own timeout doesn't bound total request duration).
-    return http_utils.get_with_retry(session, f"{config.FEC_API_BASE}/schedules/schedule_a/", params)
+    # http_utils.get_with_retry for the hard wall-clock deadline (and why
+    # it deliberately never reuses a connection across attempts).
+    return http_utils.get_with_retry(f"{config.FEC_API_BASE}/schedules/schedule_a/", params)
 
 
 def _get_state(main_conn, committee_id: str, cycle: int) -> dict:
@@ -122,7 +122,7 @@ def _upsert_org_donor(main_conn, committee_id, cycle, donor_name, entity_type, a
     )
 
 
-def ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id, cycle) -> bool:
+def ingest_committee_cycle(main_conn, cache_conn, api_key, committee_id, cycle) -> bool:
     """Pulls one (committee, cycle) to completion or the row cap. Returns True if now complete."""
     state = _get_state(main_conn, committee_id, cycle)
     if state["complete"]:
@@ -145,7 +145,7 @@ def ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id
             params["last_index"] = last_index
             params["last_contribution_receipt_date"] = last_date
 
-        data = _get(session, api_key, params)
+        data = _get(api_key, params)
         results = data.get("results", [])
         if not results:
             _save_state(main_conn, committee_id, cycle, last_index, last_date, complete=True, rows_pulled=rows_pulled)
@@ -186,7 +186,6 @@ def cycles_to_ingest() -> list[int]:
 
 
 def refresh(main_conn, cache_conn, api_key: str, chunk_size: int | None = None) -> int:
-    session = requests.Session()
     committees = principal_committees(main_conn)
     pending = [
         (cid, cycle)
@@ -207,8 +206,8 @@ def refresh(main_conn, cache_conn, api_key: str, chunk_size: int | None = None) 
     failed = 0
     for committee_id, cycle in pending:
         try:
-            ingest_committee_cycle(session, main_conn, cache_conn, api_key, committee_id, cycle)
-        except requests.exceptions.RequestException as e:
+            ingest_committee_cycle(main_conn, cache_conn, api_key, committee_id, cycle)
+        except (requests.exceptions.RequestException, concurrent.futures.TimeoutError) as e:
             failed += 1
             print(f"SKIPPING {committee_id}/{cycle} after persistent failure: {e}")
     if failed:

@@ -10,8 +10,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import requests
-
 import config
 import http_utils
 
@@ -53,7 +51,7 @@ def furthest_stage(stages: list[str]) -> str | None:
     return max(present, key=STAGE_ORDER.index)
 
 
-def _get(session: requests.Session, path: str, api_key: str, params: dict | None = None) -> dict:
+def _get(path: str, api_key: str, params: dict | None = None) -> dict:
     params = dict(params or {})
     params["api_key"] = api_key
     params["format"] = "json"
@@ -61,17 +59,17 @@ def _get(session: requests.Session, path: str, api_key: str, params: dict | None
     # wall-clock deadline (requests' own timeout doesn't bound total request
     # duration, which let a frozen connection hang the FEC backfill twice --
     # applying the same fix here defensively, before it happens on this API).
-    return http_utils.get_with_retry(session, f"{config.CONGRESS_API_BASE}{path}", params)
+    return http_utils.get_with_retry(f"{config.CONGRESS_API_BASE}{path}", params)
 
 
-def list_bills(session, congress: int, api_key: str, from_date: str | None = None):
+def list_bills(congress: int, api_key: str, from_date: str | None = None):
     """Yields bill summary dicts for a Congress, newest-updated first, paginated."""
     offset = 0
     while True:
         params = {"limit": config.CONGRESS_PAGE_SIZE, "offset": offset, "sort": "updateDate+desc"}
         if from_date:
             params["fromDateTime"] = f"{from_date}T00:00:00Z"
-        data = _get(session, f"/bill/{congress}", api_key, params)
+        data = _get(f"/bill/{congress}", api_key, params)
         bills = data.get("bills", [])
         if not bills:
             return
@@ -82,16 +80,16 @@ def list_bills(session, congress: int, api_key: str, from_date: str | None = Non
             return
 
 
-def fetch_bill_detail(session, congress: int, bill_type: str, bill_number: int, api_key: str) -> dict:
-    data = _get(session, f"/bill/{congress}/{bill_type}/{bill_number}", api_key)
+def fetch_bill_detail(congress: int, bill_type: str, bill_number: int, api_key: str) -> dict:
+    data = _get(f"/bill/{congress}/{bill_type}/{bill_number}", api_key)
     return data.get("bill", {})
 
 
-def fetch_bill_actions(session, congress: int, bill_type: str, bill_number: int, api_key: str) -> list[dict]:
+def fetch_bill_actions(congress: int, bill_type: str, bill_number: int, api_key: str) -> list[dict]:
     actions, offset = [], 0
     while True:
         data = _get(
-            session, f"/bill/{congress}/{bill_type}/{bill_number}/actions", api_key,
+            f"/bill/{congress}/{bill_type}/{bill_number}/actions", api_key,
             {"limit": 250, "offset": offset},
         )
         batch = data.get("actions", [])
@@ -101,14 +99,14 @@ def fetch_bill_actions(session, congress: int, bill_type: str, bill_number: int,
             return actions
 
 
-def fetch_bill_subjects(session, congress: int, bill_type: str, bill_number: int, api_key: str) -> list[str]:
-    data = _get(session, f"/bill/{congress}/{bill_type}/{bill_number}/subjects", api_key)
+def fetch_bill_subjects(congress: int, bill_type: str, bill_number: int, api_key: str) -> list[str]:
+    data = _get(f"/bill/{congress}/{bill_type}/{bill_number}/subjects", api_key)
     subjects = data.get("subjects", {}).get("legislativeSubjects", [])
     return [s["name"] for s in subjects if s.get("name")]
 
 
-def fetch_bill_cosponsors(session, congress: int, bill_type: str, bill_number: int, api_key: str) -> list[dict]:
-    data = _get(session, f"/bill/{congress}/{bill_type}/{bill_number}/cosponsors", api_key)
+def fetch_bill_cosponsors(congress: int, bill_type: str, bill_number: int, api_key: str) -> list[dict]:
+    data = _get(f"/bill/{congress}/{bill_type}/{bill_number}/cosponsors", api_key)
     return data.get("cosponsors", [])
 
 
@@ -172,15 +170,15 @@ def last_refreshed_date(conn, congress: int) -> str | None:
     return row["m"][:10] if row and row["m"] else None
 
 
-def _ingest_bill(conn, session, congress, api_key, summary, now_iso):
+def _ingest_bill(conn, congress, api_key, summary, now_iso):
     bill_type = summary["type"].lower()
     bill_number = summary["number"]
     bill_id = f"{congress}-{bill_type}-{bill_number}"
 
-    detail = fetch_bill_detail(session, congress, bill_type, bill_number, api_key)
-    actions = fetch_bill_actions(session, congress, bill_type, bill_number, api_key)
-    subjects = fetch_bill_subjects(session, congress, bill_type, bill_number, api_key)
-    cosponsors = fetch_bill_cosponsors(session, congress, bill_type, bill_number, api_key)
+    detail = fetch_bill_detail(congress, bill_type, bill_number, api_key)
+    actions = fetch_bill_actions(congress, bill_type, bill_number, api_key)
+    subjects = fetch_bill_subjects(congress, bill_type, bill_number, api_key)
+    cosponsors = fetch_bill_cosponsors(congress, bill_type, bill_number, api_key)
 
     stages = [derive_stage(a.get("text", "")) for a in actions]
     current_stage = furthest_stage([s for s in stages if s]) or "Introduced"
@@ -197,12 +195,11 @@ def refresh(conn, congress: int, api_key: str, limit: int | None = None) -> int:
     for first-time ingestion of a Congress -- use refresh_full() for that."""
     import datetime
 
-    session = requests.Session()
     since = last_refreshed_date(conn, congress)
     now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     count = 0
-    for summary in list_bills(session, congress, api_key, from_date=since):
-        _ingest_bill(conn, session, congress, api_key, summary, now_iso)
+    for summary in list_bills(congress, api_key, from_date=since):
+        _ingest_bill(conn, congress, api_key, summary, now_iso)
         conn.commit()
         count += 1
         if limit and count >= limit:
@@ -217,7 +214,6 @@ def refresh_full(conn, congress: int, api_key: str) -> int:
     incremental refresh() keeps it current."""
     import datetime
 
-    session = requests.Session()
     row = conn.execute(
         "SELECT last_offset, complete FROM bills_ingest_state WHERE congress = ?", (congress,)
     ).fetchone()
@@ -228,13 +224,13 @@ def refresh_full(conn, congress: int, api_key: str) -> int:
     count = 0
     while True:
         params = {"limit": config.CONGRESS_PAGE_SIZE, "offset": offset, "sort": "updateDate+desc"}
-        data = _get(session, f"/bill/{congress}", api_key, params)
+        data = _get(f"/bill/{congress}", api_key, params)
         bills = data.get("bills", [])
         total = data.get("pagination", {}).get("count", 0)
 
         now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         for summary in bills:
-            _ingest_bill(conn, session, congress, api_key, summary, now_iso)
+            _ingest_bill(conn, congress, api_key, summary, now_iso)
             count += 1
 
         offset += config.CONGRESS_PAGE_SIZE
