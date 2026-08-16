@@ -75,6 +75,13 @@ def get_with_retry(url: str, params: dict,
                 # Retry-After can legally be an HTTP-date instead of seconds
                 # (RFC 9110); don't let an unparsed date crash the run.
                 wait = min(5 * 2 ** attempt, MAX_WAIT_SECONDS)
+            if attempt == max_attempts - 1:
+                # Same early-exit the exception branch already has -- on the
+                # last attempt there's no next iteration to sleep before, so
+                # don't wait up to 300s just to discard this response anyway.
+                print(f"[http_utils] attempt {attempt}: HTTP {resp.status_code} after {time.monotonic() - t0:.1f}s, "
+                      f"server Retry-After={server_wait!r}, giving up (last attempt)", flush=True)
+                break
             print(f"[http_utils] attempt {attempt}: HTTP {resp.status_code} after {time.monotonic() - t0:.1f}s, "
                   f"server Retry-After={server_wait!r}, sleeping {wait}s", flush=True)
             time.sleep(wait)
