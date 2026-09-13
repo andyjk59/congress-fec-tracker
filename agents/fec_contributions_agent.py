@@ -185,7 +185,34 @@ def cycles_to_ingest() -> list[int]:
     return [current, current - 2, current - 4]  # current + 2 prior, enough for two retention pairs
 
 
+def reopen_stale_current_cycle_pairs(main_conn) -> int:
+    """Reopens completed pairs for the current (still-active) cycle once
+    their last run is stale, so refresh() re-polls them for contributions
+    filed since they were marked complete. Prior cycles are closed books
+    and are never reopened here -- only the in-progress current cycle
+    keeps receiving new filings. Resets `complete` only; last_index/
+    last_contribution_receipt_date are left in place so ingestion resumes
+    from the existing cursor instead of re-pulling the whole pair.
+    """
+    import datetime
+
+    cutoff = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=config.FEC_CURRENT_CYCLE_REOPEN_STALE_DAYS)
+    ).isoformat()
+    cur = main_conn.execute(
+        "UPDATE fec_ingest_state SET complete = 0 WHERE cycle = ? AND complete = 1 AND last_run_at < ?",
+        (config.current_cycle(), cutoff),
+    )
+    main_conn.commit()
+    return cur.rowcount
+
+
 def refresh(main_conn, cache_conn, api_key: str, chunk_size: int | None = None) -> int:
+    reopened = reopen_stale_current_cycle_pairs(main_conn)
+    if reopened:
+        print(f"Reopened {reopened} completed pairs for the current cycle ({config.current_cycle()}) "
+              f"to check for new contributions filed since completion")
+
     committees = principal_committees(main_conn)
     pending = [
         (cid, cycle)
