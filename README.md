@@ -84,8 +84,9 @@ scheduled run. After deploying, trigger `refresh_fec.yml` manually a
 handful of times via **Actions → Refresh FEC data → Run workflow**, raising
 `chunk_size` if you want fewer, larger runs. Each run is resumable — it
 picks up committee/cycle pairs that aren't yet `complete` in
-`fec_ingest_state`. Once every committee shows complete, the weekly
-schedule is enough to stay current.
+`fec_ingest_state`. Closed cycles stay complete forever once backfilled;
+the current cycle is periodically reopened (see limitations below) so the
+weekly schedule keeps it current too.
 
 ## Known limitations
 
@@ -110,3 +111,12 @@ Stated plainly rather than glossed over:
 - **Bill stage is derived from keyword-matching action text**
   (`agents/bills_agent.py:derive_stage`), not a first-party stage field —
   Congress.gov doesn't expose one directly.
+- **Only the current election cycle is kept fresh after its initial
+  backfill.** A completed committee/cycle pair is normally never re-polled
+  — correct for closed cycles like 2022 and 2024, whose books don't
+  change. But the current cycle keeps accumulating new filings while it's
+  still active, so those pairs are reopened once their last run is older
+  than `config.FEC_CURRENT_CYCLE_REOPEN_STALE_DAYS` (21 days), letting the
+  weekly refresh pick up contributions filed since the pair was first
+  completed. This means current-cycle numbers can lag reality by up to a
+  few weeks between reopenings, not update in real time.

@@ -18,6 +18,14 @@ FEC_RATE_LIMIT_PER_MINUTE = 100  # stay comfortably under 120/min
 FEC_PAGE_SIZE = 100
 FEC_MAX_ROWS_PER_COMMITTEE_CYCLE = 20_000  # sampled cap, see README limitations
 
+# A committee/cycle pair marked complete is normally never re-polled (see
+# fec_contributions_agent.cycles_to_ingest). That's correct for closed-book
+# cycles, but the current cycle keeps accumulating new contributions while
+# it's still active -- pairs for it are periodically reopened once their
+# last run is this many days stale, so the weekly refresh eventually picks
+# up new filings instead of freezing at whatever the initial backfill saw.
+FEC_CURRENT_CYCLE_REOPEN_STALE_DAYS = 21
+
 CONGRESS_PAGE_SIZE = 250
 
 
