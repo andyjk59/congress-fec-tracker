@@ -30,14 +30,6 @@ jobs:
         env:
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
 
-      - name: Commit and push data
+      - name: Publish bills tables
         run: |
-          git config user.name "data-bot"
-          git config user.email "actions@github.com"
-          git add data/tracker.db
-          if git diff --cached --quiet; then
-            echo "No data changes to commit"
-          else
-            git commit -m "chore: refresh bills data"
-            git push
-          fi
+          python scripts/publish_db.py --owner bills --message "chore: refresh bills data"

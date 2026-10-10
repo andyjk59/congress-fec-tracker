@@ -124,7 +124,24 @@ Stated plainly rather than glossed over:
   fingerprint cache exists.** That cache is deliberately gitignored (it
   holds hashed individual-donor data), so it lives only on the machine that
   ran the backfill — a fresh CI runner doesn't have it. The weekly job
-  therefore keeps the organizational/PAC donor tables (Search by Donor)
-  current, but leaves already-computed retention and industry-signal values
-  as they were rather than overwriting them with empty results. To refresh
-  those, re-run `scripts/refresh_fec.py` locally and push `data/tracker.db`.
+  therefore can't recompute them, and the weekly FEC refresh runs locally
+  instead (see below). CI's retention step skips pairs with no cached data
+  rather than overwriting stored values with empty results.
+
+### Local weekly FEC refresh (macOS)
+
+`scripts/local_fec_refresh.sh` ingests new FEC data, recomputes retention
+and industry signals from the local cache, and publishes the result.
+`scripts/publish_db.py` is what makes that safe: `data/tracker.db` is one
+binary file written by two jobs (CI owns the bills tables, the local job owns
+the FEC tables), so publishing takes the latest `origin/main` database and
+replaces only the publishing job's own tables before pushing, retrying if the
+other job pushed in between. Schedule it with launchd:
+
+    cp scripts/com.andykim.congress-fec-refresh.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.andykim.congress-fec-refresh.plist
+
+It runs Sundays at 18:00 local (once on wake if the Mac was asleep), logs to
+`~/Library/Logs/congress-fec-refresh.log`, and posts a notification on
+failure. Run it on demand with
+`launchctl kickstart gui/$(id -u)/com.andykim.congress-fec-refresh`.
