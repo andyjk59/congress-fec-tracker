@@ -1,8 +1,10 @@
 name: Refresh FEC data
 
+# No schedule: the weekly FEC refresh runs on a local machine instead (see
+# scripts/local_fec_refresh.sh), because retention and industry signals need
+# the gitignored raw fingerprint cache that a fresh CI runner doesn't have.
+# This manual trigger remains for ad-hoc org/PAC-donor ingestion.
 on:
-  schedule:
-    - cron: "30 9 * * 1"   # weekly, Monday 9:30am UTC
   workflow_dispatch:
     inputs:
       chunk_size:
@@ -40,14 +42,6 @@ jobs:
         env:
           FEC_API_KEY: ${{ secrets.FEC_API_KEY }}
 
-      - name: Commit and push data
+      - name: Publish fec tables
         run: |
-          git config user.name "data-bot"
-          git config user.email "actions@github.com"
-          git add data/tracker.db
-          if git diff --cached --quiet; then
-            echo "No data changes to commit"
-          else
-            git commit -m "chore: refresh FEC data"
-            git push
-          fi
+          python scripts/publish_db.py --owner fec --message "chore: refresh FEC data"
