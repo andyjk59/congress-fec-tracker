@@ -94,6 +94,13 @@ def refresh(main_conn, cache_conn) -> int:
     count = 0
     for committee_id, prior_cycle, current_cycle in committee_cycle_pairs(main_conn):
         metrics = compute_pair(cache_conn, committee_id, prior_cycle, current_cycle)
+        # The raw fingerprint cache is gitignored and only fully populated on
+        # the machine that ran the backfill; a fresh CI runner has little or
+        # none of it. Without both cycles' fingerprints there's nothing real
+        # to compute, and upserting here would overwrite good stored values
+        # with zeros/NULLs -- so leave the existing row alone.
+        if metrics["prior_cycle_donor_count"] == 0 or metrics["current_cycle_total_receipts"] == 0:
+            continue
         upsert_retention(main_conn, committee_id, prior_cycle, current_cycle, metrics)
         count += 1
     main_conn.commit()

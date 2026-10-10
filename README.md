@@ -120,3 +120,11 @@ Stated plainly rather than glossed over:
   weekly refresh pick up contributions filed since the pair was first
   completed. This means current-cycle numbers can lag reality by up to a
   few weeks between reopenings, not update in real time.
+- **Retention and industry signals are only recomputed where the raw
+  fingerprint cache exists.** That cache is deliberately gitignored (it
+  holds hashed individual-donor data), so it lives only on the machine that
+  ran the backfill — a fresh CI runner doesn't have it. The weekly job
+  therefore keeps the organizational/PAC donor tables (Search by Donor)
+  current, but leaves already-computed retention and industry-signal values
+  as they were rather than overwriting them with empty results. To refresh
+  those, re-run `scripts/refresh_fec.py` locally and push `data/tracker.db`.
