@@ -7,8 +7,12 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/andykim/Downloads/congress-fec-tracker/scripts/local_fec_refresh.sh</string>
+        <string>/Users/andykim/Developer/congress-fec-tracker/scripts/local_fec_refresh.sh</string>
     </array>
+    <key>StandardOutPath</key>
+    <string>/Users/andykim/Library/Logs/congress-fec-refresh.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/andykim/Library/Logs/congress-fec-refresh.launchd.log</string>
     <!-- Sundays 18:00 local. If the Mac is asleep then, launchd runs it once on wake. -->
     <key>StartCalendarInterval</key>
     <dict>
