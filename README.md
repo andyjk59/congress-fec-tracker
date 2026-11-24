@@ -1,5 +1,9 @@
 # Congress + FEC Tracker
 
+**Live site: https://congress-fec-tracker-j4fuyjgjbdfjakdgdgmypo.streamlit.app/**
+(hosted on Streamlit's free tier, which puts idle apps to sleep — if you see
+a "gone to sleep" page, click the button and it's back in about 30 seconds.)
+
 Tracks congressional bills through their full lifecycle — introduced,
 in committee, passed House/Senate, signed or vetoed — and pairs that with
 FEC itemized donor retention for House/Senate campaign committees across
@@ -9,9 +13,14 @@ policy area links (heuristically, via keyword matching) to industries with
 financial ties to that sponsor.
 
 The whole stack is free: Congress.gov and OpenFEC both give free API keys,
-the crosswalk data is public, hosting is GitHub Actions + Streamlit
-Community Cloud, and storage is a single SQLite file. Nothing here requires
-a paid tier of anything.
+the crosswalk data is public, hosting is Streamlit Community Cloud, scheduled
+refreshes run on GitHub Actions (bills) and a local macOS job (FEC), and
+storage is a single SQLite file. Nothing here requires a paid tier of
+anything.
+
+**Coverage:** bills for the current Congress, and FEC contributions for the
+principal campaign committees of current House/Senate members across the
+current and two prior election cycles (2022, 2024, 2026).
 
 ## How it works
 
@@ -73,20 +82,26 @@ Never commit `.env` — it's already in `.gitignore`.
 3. Go to https://share.streamlit.io, connect the repo, set the main file to
    `app.py`. **No secrets need to be set in Streamlit Cloud** — the app
    only reads the committed database.
-4. `.github/workflows/refresh_bills.yml` runs daily;
-   `.github/workflows/refresh_fec.yml` runs weekly. Each commits an updated
-   `data/tracker.db`, which triggers Streamlit Cloud to auto-redeploy.
+4. `.github/workflows/refresh_bills.yml` runs daily on GitHub Actions. FEC
+   data refreshes weekly from a local macOS job instead (see "Local weekly
+   FEC refresh" below); `refresh_fec.yml` remains only as a manual trigger.
+   Each publishes an updated `data/tracker.db` via `scripts/publish_db.py`,
+   which triggers Streamlit Cloud to auto-redeploy.
 
 ## One-time FEC backfill
 
-The first historical pull across ~535 committees is too large for a single
-scheduled run. After deploying, trigger `refresh_fec.yml` manually a
-handful of times via **Actions → Refresh FEC data → Run workflow**, raising
-`chunk_size` if you want fewer, larger runs. Each run is resumable — it
-picks up committee/cycle pairs that aren't yet `complete` in
-`fec_ingest_state`. Closed cycles stay complete forever once backfilled;
-the current cycle is periodically reopened (see limitations below) so the
-weekly schedule keeps it current too.
+The first historical pull across ~535 committees is large — days of
+wall-clock time under OpenFEC's rate limits. Run it locally, since retention
+and industry signals need the local raw fingerprint cache:
+
+    python scripts/refresh_fec.py --chunk-size 999999
+
+It's resumable — each run picks up committee/cycle pairs that aren't yet
+`complete` in `fec_ingest_state`, so it's safe to interrupt and re-run.
+Closed cycles stay complete forever once backfilled; the current cycle is
+periodically reopened (see limitations below) so the weekly refresh keeps it
+current too. Then publish with
+`python scripts/publish_db.py --owner fec`.
 
 ## Known limitations
 
@@ -123,9 +138,9 @@ Stated plainly rather than glossed over:
 - **Retention and industry signals are only recomputed where the raw
   fingerprint cache exists.** That cache is deliberately gitignored (it
   holds hashed individual-donor data), so it lives only on the machine that
-  ran the backfill — a fresh CI runner doesn't have it. The weekly job
-  therefore can't recompute them, and the weekly FEC refresh runs locally
-  instead (see below). CI's retention step skips pairs with no cached data
+  ran the backfill — a fresh CI runner doesn't have it. CI therefore can't
+  recompute them, and the weekly FEC refresh runs locally instead (see
+  below). CI's retention step skips pairs with no cached data
   rather than overwriting stored values with empty results.
 
 ### Local weekly FEC refresh (macOS)
@@ -136,7 +151,9 @@ and industry signals from the local cache, and publishes the result.
 binary file written by two jobs (CI owns the bills tables, the local job owns
 the FEC tables), so publishing takes the latest `origin/main` database and
 replaces only the publishing job's own tables before pushing, retrying if the
-other job pushed in between. Schedule it with launchd:
+other job pushed in between. Schedule it with launchd (the plist hardcodes this checkout's path, so edit
+it if yours lives elsewhere; keep the repo outside `~/Downloads`, `~/Desktop`
+and `~/Documents`, which macOS blocks background jobs from reading):
 
     cp scripts/com.andykim.congress-fec-refresh.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.andykim.congress-fec-refresh.plist
